@@ -1,0 +1,30 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+env
+venv
+.env
+.venv
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Data (Don't bake personal data into image)
+data/portfolio.db
+data/alerts.db
+data/scan_results.json
+logs/
+
+# Secrets
+.env
+.env.local
+
+# IDE
+.vscode
+.idea
