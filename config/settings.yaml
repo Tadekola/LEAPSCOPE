@@ -1,0 +1,183 @@
+app:
+  name: "LEAPSCOPE"
+  version: "0.2.0"  # Phase 7.5
+  log_level: "INFO"
+
+market:
+  universe_size: "SP500"
+
+trading:
+  risk_free_rate: 0.04  # 4%
+
+# ============================================
+# DATA PROVIDERS CONFIGURATION
+# ============================================
+providers:
+  # Provider priority order (first available is used)
+  # Tradier is PRIMARY for options data
+  priority:
+    - tradier
+    - yfinance
+  
+  tradier:
+    api_token: ""  # Set your Tradier API token here
+    use_sandbox: false
+    rate_limit_sleep: 0.5
+  
+  yfinance:
+    rate_limit_sleep: 1.0
+
+# ============================================
+# TECHNICAL ANALYSIS
+# ============================================
+technical_analysis:
+  sma_fast: 50
+  sma_slow: 200
+  rsi_period: 14
+  rsi_overbought: 70
+  rsi_oversold: 30
+  atr_period: 14
+  bollinger_period: 20
+  bollinger_std: 2.0
+  hv_window: 20  # Historical volatility window (days)
+
+# ============================================
+# FUNDAMENTALS SCORING
+# ============================================
+fundamentals:
+  min_score_leaps: 60
+  weights:
+    growth: 0.30
+    profitability: 0.30
+    balance_sheet: 0.25
+    stability: 0.15
+  thresholds:
+    growth_revenue_yoy_good: 0.10   # 10%
+    growth_earnings_yoy_good: 0.10  # 10%
+    profitability_net_margin_good: 0.15  # 15%
+    profitability_roe_good: 0.15    # 15%
+    debt_to_equity_max_good: 1.5
+    current_ratio_min_good: 1.2
+
+# ============================================
+# OPTIONS CONFIGURATION
+# ============================================
+options:
+  min_days_to_expiration: 300  # LEAPS definition (>10 months)
+  min_open_interest: 50
+  max_bid_ask_spread_pct: 0.10  # 10% of price
+  target_delta_min: 0.65
+  target_delta_max: 0.85
+  min_volume: 5
+
+# ============================================
+# DECISION ENGINE
+# ============================================
+decision:
+  require_bullish_trend: true
+  max_rsi_entry: 70
+  min_fundamentals_score: 60
+  max_iv_hv_ratio: 1.5  # Avoid buying if IV > 150% of HV
+  
+  # P0 Policy: Earnings Risk Gate
+  earnings_block_days: 14  # Block GO signals within N days of earnings
+  
+  # P0 Policy: UNKNOWN Data Handling
+  unknown_data_policy: "fail"  # fail | neutral (fail = strict, neutral = warn only)
+  
+  # ETF Handling Policy
+  etf_bypass_fundamentals: true  # ETFs skip fundamental scoring
+
+# ============================================
+# ETF CLASSIFICATION
+# ============================================
+etf:
+  # Known ETF symbols for classification
+  known_symbols:
+    - SPY
+    - QQQ
+    - IWM
+    - DIA
+    - GLD
+    - SLV
+    - TLT
+    - IEF
+    - VTI
+    - VOO
+    - VEA
+    - VWO
+    - BND
+    - LQD
+    - HYG
+    - XLF
+    - XLE
+    - XLK
+    - XLV
+    - XLI
+    - XLP
+    - XLY
+    - XLU
+    - XLB
+    - ARKK
+    - ARKG
+    - EEM
+    - EFA
+  
+  # ETF fundamental handling policy
+  fundamental_policy: "bypass"  # bypass | neutral_score
+
+# ============================================
+# PORTFOLIO MANAGEMENT (Phase 8)
+# ============================================
+portfolio:
+  # Profit/Loss thresholds for signals
+  take_profit_pct: 50       # Trigger TAKE_PROFIT signal at +50%
+  stop_loss_pct: -30        # Trigger STOP_LOSS signal at -30%
+  
+  # Expiration management
+  expiry_review_days: 120   # Trigger EXPIRY_REVIEW when <= 120 days to expiry
+  roll_guidance_days: 270   # Include roll guidance in action when <= 270 days
+  
+  # Pricing preferences
+  pricing_preference: "MID"  # MID / BID / ASK
+  allow_bs_fallback: true    # Allow Black-Scholes fallback when market data unavailable
+  
+  # Storage
+  db_path: "data/portfolio.db"
+  export_path: "data/portfolio.json"
+  
+  # Position limits (optional)
+  max_positions: 20          # Maximum open positions (0 = unlimited)
+
+# ============================================
+# CONVICTION SCORING (Phase 9)
+# ============================================
+conviction_scoring:
+  # Component weights (must sum to 1.0)
+  weight_technical: 0.30
+  weight_fundamental: 0.25
+  weight_volatility: 0.25
+  weight_liquidity: 0.20
+  
+  # Band thresholds
+  strong_threshold: 75      # Score >= 75 = STRONG
+  moderate_threshold: 50    # Score >= 50 = MODERATE, < 50 = WEAK
+  
+  # ETF handling
+  etf_fundamental_score: 70  # Proxy score for ETFs
+
+# ============================================
+# ALERTS (Phase 9)
+# ============================================
+alerts:
+  console_output: true       # Print alerts to console
+  conviction_threshold: 75   # Alert when conviction crosses this
+  persist_days: 30           # Keep alerts for N days
+
+# ============================================
+# SCAN HISTORY (Phase 9)
+# ============================================
+scan_history:
+  enabled: true
+  retain_days: 30            # Keep scan history for N days
+  compare_previous: true     # Auto-compare with previous scan
