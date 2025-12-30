@@ -20,17 +20,36 @@ st.set_page_config(
 # Constants
 RESULTS_PATH = Path("data/scan_results.json")
 
-# Financial Disclaimer (P0 requirement)
+# Financial Disclaimer (P0 requirement) - ENHANCED
 FINANCIAL_DISCLAIMER = """
-**⚠️ IMPORTANT DISCLAIMER**
+**CRITICAL RISK DISCLOSURE**
 
-This tool is for **educational and research purposes only**. It does not constitute financial advice, 
-investment recommendations, or a solicitation to buy or sell any securities. 
+This tool is for **EDUCATIONAL and RESEARCH purposes ONLY**.
 
-- Past performance does not guarantee future results
-- Options trading involves significant risk of loss
-- Always consult a qualified financial advisor before making investment decisions
-- The developers assume no liability for trading decisions made using this tool
+**IT IS NOT:**
+- Investment advice or trade recommendations
+- A guarantee of any trading outcome
+- A substitute for professional financial advice
+- A validated or backtested trading system
+
+**RISKS YOU MUST UNDERSTAND:**
+- LEAPS options can lose 100% of their value
+- Gap risk: Stop losses provide NO protection against overnight gaps
+- GO signals have NOT been backtested for effectiveness
+- Conviction scores are NOT probabilities of success
+- Past patterns do NOT predict future results
+
+**BY USING THIS SOFTWARE:**
+- You acknowledge these risks
+- You will make your own investment decisions
+- You accept that developers have NO liability for your outcomes
+"""
+
+# Risk warning banner for GO signals
+GO_SIGNAL_WARNING = """
+**RISK WARNING**: GO signals are analytical outputs, NOT trade recommendations.
+Historical effectiveness is UNVALIDATED. LEAPS can lose 100% of value.
+Always consult a financial advisor.
 """
 
 def load_scan_data():
@@ -180,19 +199,24 @@ def render_scanner_tab():
         st.info("No symbols match the current filters.")
         return
 
+    # Show warning banner if there are GO signals
+    go_count = len([d for d in filtered_data if d["decision"] == "GO"])
+    if go_count > 0:
+        st.error(GO_SIGNAL_WARNING)
+    
     # Summary Metrics
     col1, col2, col3, col4, col5 = st.columns(5)
-    go_count = len([d for d in filtered_data if d["decision"] == "GO"])
     watch_count = len([d for d in filtered_data if d["decision"] == "WATCH"])
     strong_count = len([d for d in filtered_data if d.get("conviction", {}).get("band") == "STRONG"])
     
     avg_conviction = sum([d.get("conviction", {}).get("score", 0) for d in filtered_data]) / len(filtered_data) if filtered_data else 0
     
-    col1.metric("🟢 GO Signals", go_count)
-    col2.metric("🟡 WATCH", watch_count)
-    col3.metric("💪 STRONG Conv.", strong_count)
-    col4.metric("📊 Avg Conviction", f"{avg_conviction:.0f}")
-    col5.metric("📈 Total", len(filtered_data))
+    col1.metric("GO Signals", go_count, help="NOT trade recommendations")
+    col2.metric("WATCH", watch_count)
+    col3.metric("Strong Band", strong_count, help="High conviction does NOT mean high probability")
+    # Show conviction as range instead of false precision
+    col4.metric("Avg Conviction", f"~{int(avg_conviction/10)*10}-{int(avg_conviction/10)*10+10}", help="Approximate range, NOT a probability")
+    col5.metric("Total", len(filtered_data))
 
     st.markdown("---")
 
@@ -205,19 +229,23 @@ def render_scanner_tab():
         conv_score = conviction.get("score", 0)
         conv_band = conviction.get("band", "N/A")
         
-        # Color-code conviction band
-        band_emoji = "💪" if conv_band == "STRONG" else "📊" if conv_band == "MODERATE" else "📉"
+        # Reduce false precision - show ranges instead of exact numbers
+        # Round to nearest 5 to avoid implying false precision
+        conv_score_rounded = int(round(conv_score / 5) * 5)
         
-        # Decision emoji
-        decision_emoji = "🟢" if d["decision"] == "GO" else "🟡" if d["decision"] == "WATCH" else "🔴"
+        # Use neutral labels instead of encouraging emojis
+        band_label = f"{conv_band}"
+        
+        # Decision label - neutral wording
+        decision_label = d["decision"]
         
         table_data.append({
             "Symbol": d["symbol"],
             "Type": d.get("asset_type", "STOCK"),
             "Price": f"${d['current_price']:.2f}",
-            "Decision": f"{decision_emoji} {d['decision']}",
-            "Conviction": f"{band_emoji} {conv_score:.0f}",
-            "Band": conv_band,
+            "Decision": decision_label,
+            "Score": f"~{conv_score_rounded}",  # Approximate, not exact
+            "Band": band_label,
             "Trend": d["scores"]["technical_trend"],
             "Fund": d["scores"]["fundamental"],
             "Options": d["scores"]["options_candidates"],
@@ -681,13 +709,21 @@ def render_alerts_tab():
 def render_disclaimer():
     """Render the financial disclaimer footer."""
     st.markdown("---")
-    with st.expander("📋 Legal Disclaimer", expanded=False):
+    
+    # ALWAYS VISIBLE warning box
+    st.warning(
+        "**IMPORTANT**: This tool is for EDUCATIONAL purposes only. "
+        "GO signals are NOT trade recommendations. Historical effectiveness is UNVALIDATED. "
+        "LEAPS can lose 100% of value. Consult a financial advisor."
+    )
+    
+    with st.expander("📋 Full Risk Disclosure (MUST READ)", expanded=False):
         st.markdown(FINANCIAL_DISCLAIMER)
     
     # Always visible mini disclaimer
     st.caption(
-        "⚠️ For educational purposes only. Not financial advice. "
-        "Options trading involves significant risk."
+        "Options trading involves significant risk of loss including total loss of investment. "
+        "Past performance does not guarantee future results."
     )
 
 if __name__ == "__main__":

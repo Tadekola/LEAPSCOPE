@@ -3,6 +3,13 @@ from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
 from enum import Enum
 
+from src.utils.validation import (
+    get_decision_disclaimer, 
+    RISK_WARNINGS,
+    DataValidator,
+    MarketStatus
+)
+
 
 class Decision(str, Enum):
     GO = "GO"
@@ -89,12 +96,17 @@ class DecisionEngine:
             decision = Decision.WATCH
             self.logger.warning(f"[{symbol}] Decision downgraded from GO to WATCH due to earnings proximity")
         
+        # Build risk warnings based on decision
+        risk_warnings = self._generate_risk_warnings(decision, earnings_risk, opt_report)
+        
         result = {
             "symbol": symbol,
             "decision": decision.value,
             "reasons": reasons,
             "asset_type": asset_type,
             "earnings_risk": earnings_risk,
+            "disclaimer": get_decision_disclaimer(),
+            "risk_warnings": risk_warnings,
             "summary": {
                 "technical": ta_status,
                 "fundamental": fund_status,
@@ -104,7 +116,37 @@ class DecisionEngine:
         }
         
         self.logger.info(f"Decision for {symbol} ({asset_type}): {decision.value}")
+        
+        # Log disclaimer with every decision
+        if decision == Decision.GO:
+            self.logger.warning(f"[{symbol}] GO SIGNAL - {get_decision_disclaimer()}")
+        
         return result
+    
+    def _generate_risk_warnings(self, decision: Decision, earnings_risk: bool, opt_report: Dict[str, Any]) -> List[str]:
+        """
+        Generate contextual risk warnings based on the decision.
+        These warnings MUST be displayed to users.
+        """
+        warnings = []
+        
+        # Always include the primary disclaimer for GO signals
+        if decision == Decision.GO:
+            warnings.append(RISK_WARNINGS["signal_not_advice"])
+            warnings.append(RISK_WARNINGS["gap_risk"])
+            warnings.append(RISK_WARNINGS["leaps_total_loss"])
+        
+        # Earnings-related warnings
+        if earnings_risk:
+            warnings.append(RISK_WARNINGS["earnings_binary"])
+            warnings.append(RISK_WARNINGS["iv_crush"])
+        
+        # Add conviction uncertainty warning for any actionable signal
+        if decision in (Decision.GO, Decision.WATCH):
+            warnings.append(RISK_WARNINGS["conviction_uncertainty"])
+            warnings.append(RISK_WARNINGS["data_limitations"])
+        
+        return warnings
 
     def _evaluate_technical(self, report: Dict[str, Any], reasons: List[str]) -> bool:
         """Evaluate technical analysis with UNKNOWN handling."""

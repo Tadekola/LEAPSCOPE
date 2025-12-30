@@ -69,16 +69,23 @@ Composite score combining:
 
 ---
 
-## Live Data & Providers
+## Live Data & Providers (Hybrid Multi-Source)
 
-| Data Type | Source |
-| :--- | :--- |
-| **Live prices** | Tradier |
-| **Options chains & Greeks** | Tradier |
-| **Implied volatility** | Tradier |
-| **Fundamentals** | Yahoo Finance |
-| **Earnings dates** | Yahoo Finance |
-| **Historical OHLCV** | Yahoo Finance |
+LEAPSCOPE uses a **hybrid multi-source approach** for maximum data reliability:
+
+| Data Type | Primary Source | Fallback |
+| :--- | :--- | :--- |
+| **Live prices** | Tradier API | Yahoo Finance Quote API |
+| **Options chains & Greeks** | Tradier | yfinance |
+| **Implied volatility** | Tradier | Calculated from chain |
+| **Fundamentals** | Yahoo Finance | - |
+| **Earnings dates** | Yahoo Finance | - |
+| **Historical OHLCV** | yfinance (split-adjusted) | Tradier |
+
+**Price Fetching Priority:**
+1. Tradier live API (if configured)
+2. Yahoo Finance direct quote API (`regularMarketPrice`)
+3. yfinance OHLCV fallback
 
 🔒 **Security**: Tradier credentials are loaded securely from a `.env` file. **No secrets are hard-coded.**
 
@@ -86,15 +93,27 @@ Composite score combining:
 
 ## Safety & Design Principles
 
-*   ❌ **No auto-trading**
-*   ❌ **No order submission**
-*   ❌ **No execution paths**
-*   ✅ **Draft order tickets are always blocked**
-*   ✅ **UNKNOWN data never passes decision gates**
-*   ✅ **Earnings risk explicitly enforced**
-*   ✅ **Human review required for all actions**
+### What LEAPSCOPE Does NOT Do:
+*   **No auto-trading** - Cannot execute trades
+*   **No order submission** - Cannot send orders to brokers
+*   **No execution paths** - Code explicitly blocks execution
+*   **No trade recommendations** - GO signals are analytical outputs only
+
+### What LEAPSCOPE Does:
+*   **Draft order tickets blocked** - `_execution_blocked = True` enforced
+*   **UNKNOWN data fails gates** - Missing data never passes as valid
+*   **Earnings risk enforced** - 14-day buffer around earnings
+*   **Human review required** - All decisions require manual action
+*   **Risk warnings embedded** - Disclaimers at point of decision
+*   **Signal tracking** - Records signals for future validation
+*   **Market hours warnings** - Alerts when market is closed
 
 LEAPSCOPE is a **decision-support system**, not a trading bot.
+
+### Signal Validation Status
+
+Signals are tracked for future validation but **historical effectiveness is currently UNKNOWN**.
+The system will build a track record over time, but users should not assume signals are profitable.
 
 ---
 
@@ -169,6 +188,11 @@ TRADIER_BASE_URL=https://api.tradier.com/v1
 poetry run python src/main.py scan
 ```
 
+### Scan specific symbols
+```bash
+poetry run python src/main.py scan --symbols NVDA,AAPL,GOOGL
+```
+
 ### View portfolio status
 ```bash
 poetry run python src/main.py portfolio
@@ -182,6 +206,54 @@ The dashboard will display live data status, scanner results, portfolio position
 
 ---
 
+## Understanding the Decision Framework
+
+### GO / WATCH / NO_GO Signals
+
+The decision engine requires **ALL THREE** conditions to pass for a **GO** signal:
+
+| Condition | What It Checks | Required for GO |
+|-----------|----------------|------------------|
+| **Technical** | Trend = BULLISH (price > SMA50 > SMA200) | Must pass |
+| **Fundamental** | Score >= 60 (ETFs get bypass score of 70) | Must pass |
+| **Options/Volatility** | IV/HV ratio <= 1.5x AND valid LEAPS candidates | Must pass |
+
+### Common Reasons for WATCH Instead of GO
+
+| Scenario | Explanation |
+|----------|-------------|
+| High IV/HV ratio | Options are "expensive" relative to historical volatility - wait for better pricing |
+| No LEAPS candidates | Insufficient liquidity or no strikes in target delta range (0.65-0.85) |
+| Earnings within 14 days | Downgraded from GO to WATCH due to binary event risk |
+
+### How to Interpret Results
+
+| Decision | Meaning | Suggested Action |
+|----------|---------|------------------|
+| **GO** | All conditions met, options fairly priced | Worth deeper research for potential entry |
+| **WATCH** | Fundamentals/technicals OK, but options expensive or volatility concern | Monitor, wait for better entry point |
+| **NO_GO** | Technical trend not bullish OR fundamentals weak | Not a LEAPS candidate at this time |
+
+### Conviction Score (0-100)
+
+The conviction score is a **composite quality metric**, NOT a probability:
+
+| Component | Weight | What It Measures |
+|-----------|--------|------------------|
+| Technical | 30% | Trend strength, momentum, crossovers |
+| Fundamental | 25% | Growth, profitability, balance sheet |
+| Volatility | 25% | IV/HV attractiveness |
+| Liquidity | 20% | Options market depth, spreads |
+
+**Conviction Bands:**
+- **STRONG** (75+): High quality across all factors
+- **MODERATE** (50-74): Acceptable quality, some weaknesses
+- **WEAK** (<50): Significant concerns in one or more areas
+
+> **Important**: A score of 80 does NOT mean 80% chance of profit. Scores have not been backtested.
+
+---
+
 ## Target Audience
 
 *   **Who This Is For**: LEAPS traders, Long-term options investors, PMCC / diagonal spread users, Quant-curious discretionary traders, Engineers building safe trading tools.
@@ -189,10 +261,36 @@ The dashboard will display live data status, scanner results, portfolio position
 
 ---
 
-## Disclaimer ⚠️
+## CRITICAL RISK DISCLOSURE
 
-**This project is for educational and research purposes only.**
-It does not constitute financial advice or a recommendation to buy or sell securities. Options trading involves significant risk. You are responsible for your own decisions.
+**READ THIS BEFORE USING LEAPSCOPE**
+
+### This Software is for EDUCATIONAL and RESEARCH Purposes ONLY
+
+**IT IS NOT:**
+- Investment advice or trade recommendations
+- A guarantee of any trading outcome
+- A substitute for professional financial advice
+- A validated or backtested trading system
+
+### RISKS YOU MUST UNDERSTAND:
+
+| Risk | Description |
+|------|-------------|
+| **Total Loss** | LEAPS options can lose 100% of their value |
+| **Gap Risk** | Stop losses provide NO protection against overnight gaps. Positions can lose 50-100% on adverse overnight moves |
+| **Unvalidated Signals** | GO signals have NOT been backtested for effectiveness. Historical win rates are UNKNOWN |
+| **False Precision** | Conviction scores are NOT probabilities. A score of 80 does NOT mean 80% chance of profit |
+| **Data Limitations** | Analysis is based on point-in-time data which may be delayed or incomplete |
+| **Earnings Risk** | Binary events can cause unpredictable moves regardless of technical/fundamental setup |
+| **IV Crush** | Implied volatility typically drops after earnings, causing losses even on correct directional bets |
+
+### BY USING THIS SOFTWARE, YOU ACKNOWLEDGE:
+- You understand options trading risks including total loss of investment
+- You will make your own investment decisions
+- You will consult qualified financial professionals as needed
+- The developers assume NO LIABILITY for your trading outcomes
+- Past patterns do NOT predict future results
 
 ---
 
@@ -206,3 +304,11 @@ No license selected yet. Please choose an appropriate open-source license (e.g.,
 
 **LEAPSCOPE v1.0 — Complete & Live (Signals Only)**
 Production-ready decision-support system with live market data integration.
+
+### Version History
+
+| Version | Features |
+|---------|----------|
+| v0.3.0 | Hybrid multi-source data, signal tracking, market hours validation |
+| v0.2.0 | Portfolio management, alerts, scan history |
+| v0.1.0 | Core scanner, decision engine, conviction scoring |

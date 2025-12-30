@@ -16,6 +16,7 @@ from src.portfolio.storage import PortfolioStorage
 from src.portfolio.pricing import PositionPricer
 from src.providers.manager import ProviderManager
 from src.analysis.technical import TechnicalAnalyzer
+from src.utils.validation import RISK_WARNINGS, get_decision_disclaimer
 
 
 class PortfolioManager:
@@ -153,7 +154,8 @@ class PortfolioManager:
                 recommended_action=(
                     "CRITICAL: Consider closing position to limit further losses. "
                     "Evaluate if the original thesis is still valid. "
-                    "If technical breakdown confirmed, exit may be warranted."
+                    "If technical breakdown confirmed, exit may be warranted. "
+                    f"\n\nRISK WARNING: {RISK_WARNINGS['gap_risk']}"
                 )
             )
         

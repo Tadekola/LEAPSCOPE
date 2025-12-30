@@ -33,11 +33,32 @@ class YFinanceProvider(DataProvider):
         return "yfinance"
     
     def fetch_ohlcv(self, symbol: str, period: str = "2y", interval: str = "1d") -> pd.DataFrame:
-        """Fetch OHLCV data from yfinance."""
+        """
+        Fetch OHLCV data from yfinance with cache-busting.
+        Uses date range instead of period for more reliable fresh data.
+        """
         self.logger.info(f"[{self.name}] Fetching OHLCV for {symbol}")
         try:
-            ticker = yf.Ticker(symbol)
-            df = ticker.history(period=period, interval=interval)
+            # Calculate date range to avoid caching issues
+            end_date = datetime.now()
+            
+            # Map period to days
+            period_days = {
+                "1d": 1, "5d": 5, "1mo": 30, "3mo": 90,
+                "6mo": 180, "1y": 365, "2y": 730, "5y": 1825
+            }
+            days = period_days.get(period, 730)
+            start_date = end_date - timedelta(days=days)
+            
+            # Use download() with explicit dates for fresh data
+            df = yf.download(
+                symbol, 
+                start=start_date.strftime("%Y-%m-%d"),
+                end=end_date.strftime("%Y-%m-%d"),
+                interval=interval,
+                progress=False,
+                auto_adjust=True  # Adjust for splits/dividends
+            )
             
             if df.empty:
                 self.logger.warning(f"[{self.name}] No OHLCV data for {symbol}")
@@ -47,6 +68,10 @@ class YFinanceProvider(DataProvider):
             df.columns = [c.lower() for c in df.columns]
             if df.index.name == 'Date':
                 df.index.name = 'date'
+            
+            # Log the last date we have data for
+            last_date = df.index[-1]
+            self.logger.info(f"[{self.name}] {symbol} latest data: {last_date}, close: {df['close'].iloc[-1]:.2f}")
             
             time.sleep(self.rate_limit_sleep)
             return df

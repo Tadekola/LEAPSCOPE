@@ -11,7 +11,9 @@ from src.analysis.options import OptionsAnalyzer
 from src.decision.engine import DecisionEngine
 from src.scoring.conviction import ConvictionScorer
 from src.history.scan_history import ScanHistory
+from src.history.signal_tracker import SignalTracker
 from src.alerts.manager import AlertManager, AlertSeverity
+from src.utils.validation import DataValidator, get_risk_disclaimer_full
 
 
 class Scanner:
@@ -51,6 +53,10 @@ class Scanner:
         self.scan_history = ScanHistory()
         self.alert_manager = AlertManager(config=config)
         
+        # Phase 10: Signal tracking and data validation
+        self.signal_tracker = SignalTracker()
+        self.data_validator = DataValidator(max_data_age_minutes=15, strict_mode=False)
+        
         self.logger.info(f"Scanner initialized with {len(self._known_etfs)} known ETF symbols")
 
     def scan(self, symbols: List[str]) -> List[Dict[str, Any]]:
@@ -58,16 +64,28 @@ class Scanner:
         Run the full analysis pipeline on a list of symbols.
         
         Pipeline:
-        1. Fetch OHLCV data
-        2. Run Technical Analysis
-        3. Determine asset type (STOCK/ETF)
-        4. Fetch fundamentals (if STOCK)
-        5. Fetch earnings date (for risk gate)
-        6. Fetch options chain (Tradier preferred)
-        7. Run Decision Engine
+        1. Check market status and log warnings
+        2. Fetch OHLCV data
+        3. Run Technical Analysis
+        4. Determine asset type (STOCK/ETF)
+        5. Fetch fundamentals (if STOCK)
+        6. Fetch earnings date (for risk gate)
+        7. Fetch options chain (Tradier preferred)
+        8. Run Decision Engine
+        9. Track signals for validation
         """
         self.logger.info(f"Starting scan for {len(symbols)} symbols...")
         self.logger.info(f"Available providers: {self.provider.get_available_providers()}")
+        
+        # Check market status and warn user
+        market_warning = self.data_validator.get_market_status_warning()
+        if market_warning:
+            self.logger.warning(f"MARKET STATUS WARNING: {market_warning}")
+            print(f"\n{'='*60}")
+            print(f"MARKET STATUS WARNING")
+            print(f"{'='*60}")
+            print(market_warning)
+            print(f"{'='*60}\n")
         
         results = []
         
@@ -98,18 +116,78 @@ class Scanner:
         scan_id = self.scan_history.save_scan(results, self.config)
         self._generate_scan_alerts(results, scan_id)
         
+        # Phase 10: Track GO/WATCH signals for validation
+        self._track_signals(results)
+        
+        # Print risk disclaimer at end of scan
+        self._print_scan_summary(results)
+        
         return results
+    
+    def _track_signals(self, results: List[Dict[str, Any]]):
+        """Track GO and WATCH signals for future validation."""
+        tracked_count = 0
+        for result in results:
+            if result.get("decision") in ("GO", "WATCH"):
+                try:
+                    self.signal_tracker.track_signal(result)
+                    tracked_count += 1
+                except Exception as e:
+                    self.logger.warning(f"Failed to track signal for {result.get('symbol')}: {e}")
+        
+        self.logger.info(f"Tracked {tracked_count} signals for future validation")
+    
+    def _print_scan_summary(self, results: List[Dict[str, Any]]):
+        """Print scan summary with risk disclaimers."""
+        go_count = len([r for r in results if r.get("decision") == "GO"])
+        watch_count = len([r for r in results if r.get("decision") == "WATCH"])
+        
+        print(f"\n{'='*60}")
+        print("SCAN COMPLETE")
+        print(f"{'='*60}")
+        print(f"Total symbols: {len(results)}")
+        print(f"GO signals: {go_count}")
+        print(f"WATCH signals: {watch_count}")
+        
+        if go_count > 0:
+            print(f"\n{'!'*60}")
+            print("IMPORTANT RISK DISCLOSURE")
+            print(f"{'!'*60}")
+            print("GO signals are NOT trade recommendations.")
+            print("Historical effectiveness has NOT been validated.")
+            print("LEAPS options can lose 100% of value.")
+            print("Consult a financial advisor before trading.")
+            print(f"{'!'*60}")
+        
+        # Show validation stats
+        stats = self.signal_tracker.get_validation_stats()
+        print(f"\nSignal Tracking Status: {stats.get('validation_status', 'UNKNOWN')}")
+        print(f"GO signals tracked: {stats.get('total_go_signals', 0)}")
+        print(f"GO signals validated (30d): {stats.get('go_signals_validated', 0)}")
+        if stats.get('go_avg_30d_change') is not None:
+            print(f"Avg 30d underlying change: {stats['go_avg_30d_change']:.1f}%")
+        print(f"\n{stats.get('validation_message', '')}")
+        print(f"{'='*60}\n")
 
     def _scan_symbol(self, symbol: str) -> Optional[Dict[str, Any]]:
         """Scan a single symbol through the full pipeline."""
         
-        # 1. Fetch OHLCV data
+        # 1. Fetch OHLCV data for technical analysis
         df = self.provider.fetch_ohlcv(symbol)
         if df.empty:
             self.logger.warning(f"Skipping {symbol}: No historical data.")
             return None
         
-        current_price = float(df['close'].iloc[-1])
+        # 1b. Get LIVE price using hybrid multi-source approach
+        live_price, price_source = self.provider.fetch_live_price(symbol)
+        if live_price is not None:
+            current_price = live_price
+            self.logger.info(f"[{symbol}] Using live price: ${current_price:.2f} from {price_source}")
+        else:
+            # Fallback to OHLCV close if live price unavailable
+            current_price = float(df['close'].iloc[-1])
+            price_source = "ohlcv_close"
+            self.logger.warning(f"[{symbol}] Using OHLCV close as fallback: ${current_price:.2f}")
         
         # 2. Technical Analysis
         ta_report = self.ta_engine.analyze(symbol, df)

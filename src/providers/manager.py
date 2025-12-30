@@ -2,6 +2,7 @@ import logging
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 import pandas as pd
+import requests
 
 from src.providers.base import DataProvider
 from src.providers.yfinance_provider import YFinanceProvider
@@ -182,32 +183,90 @@ class ProviderManager:
     
     def fetch_live_price(self, symbol: str) -> tuple:
         """
-        Fetch LIVE underlying price.
+        Fetch LIVE underlying price using hybrid multi-source approach.
         Returns (price, source) tuple.
         
-        Priority: Tradier (live) > yfinance (fallback)
+        Priority:
+        1. Tradier (live API)
+        2. Yahoo Finance direct quote API
+        3. yfinance OHLCV fallback
         """
-        # Try Tradier first for live data
+        prices_found = []
+        
+        # 1. Try Tradier first for live data
         tradier = self._providers.get("tradier")
         if tradier and tradier.is_available():
-            price = tradier.fetch_underlying_price(symbol)
-            if price is not None:
-                self.logger.info(f"LIVE price for {symbol}: ${price:.2f} [tradier]")
-                return (price, "tradier_live")
-        
-        # Fallback to yfinance
-        yf = self._providers.get("yfinance")
-        if yf:
             try:
-                df = yf.fetch_ohlcv(symbol, period="5d", interval="1d")
-                if not df.empty:
-                    price = float(df["close"].iloc[-1])
-                    self.logger.info(f"FALLBACK price for {symbol}: ${price:.2f} [yfinance]")
-                    return (price, "yfinance_fallback")
+                price = tradier.fetch_underlying_price(symbol)
+                if price is not None and price > 0:
+                    self.logger.info(f"LIVE price for {symbol}: ${price:.2f} [tradier]")
+                    prices_found.append((price, "tradier_live"))
             except Exception as e:
-                self.logger.warning(f"yfinance price fallback failed: {e}")
+                self.logger.warning(f"Tradier price fetch failed: {e}")
+        
+        # 2. Try Yahoo Finance direct quote API (faster than OHLCV)
+        try:
+            yf_price = self._fetch_yahoo_quote_direct(symbol)
+            if yf_price is not None and yf_price > 0:
+                self.logger.info(f"Yahoo quote for {symbol}: ${yf_price:.2f}")
+                prices_found.append((yf_price, "yahoo_quote"))
+        except Exception as e:
+            self.logger.warning(f"Yahoo direct quote failed: {e}")
+        
+        # 3. Fallback to yfinance OHLCV
+        if not prices_found:
+            yf_provider = self._providers.get("yfinance")
+            if yf_provider:
+                try:
+                    df = yf_provider.fetch_ohlcv(symbol, period="5d", interval="1d")
+                    if not df.empty:
+                        price = float(df["close"].iloc[-1])
+                        self.logger.info(f"OHLCV fallback price for {symbol}: ${price:.2f}")
+                        prices_found.append((price, "yfinance_ohlcv"))
+                except Exception as e:
+                    self.logger.warning(f"yfinance OHLCV fallback failed: {e}")
+        
+        # Return best price found
+        if prices_found:
+            # If we have multiple sources, log them for comparison
+            if len(prices_found) > 1:
+                self.logger.info(f"Price sources for {symbol}: {prices_found}")
+            return prices_found[0]  # Return first (highest priority)
         
         return (None, "unavailable")
+    
+    def _fetch_yahoo_quote_direct(self, symbol: str) -> Optional[float]:
+        """
+        Fetch real-time quote directly from Yahoo Finance API.
+        This is faster and more current than OHLCV data.
+        """
+        try:
+            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+            params = {
+                "interval": "1d",
+                "range": "1d"
+            }
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            }
+            
+            response = requests.get(url, params=params, headers=headers, timeout=10)
+            
+            if response.status_code == 200:
+                data = response.json()
+                result = data.get("chart", {}).get("result", [])
+                if result:
+                    meta = result[0].get("meta", {})
+                    # regularMarketPrice is the most current price
+                    price = meta.get("regularMarketPrice")
+                    if price:
+                        return float(price)
+            
+            return None
+            
+        except Exception as e:
+            self.logger.debug(f"Yahoo direct quote error: {e}")
+            return None
     
     def fetch_live_option_quote(self, option_symbol: str) -> Dict[str, Any]:
         """
